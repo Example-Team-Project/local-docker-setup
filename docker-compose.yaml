@@ -1,0 +1,222 @@
+version: '3'
+
+services:
+#  zookeeper:
+#    image: confluentinc/cp-zookeeper:7.0.1
+#    container_name: zookeeper
+#    environment:
+#      ZOOKEEPER_CLIENT_PORT: 2181
+#      ZOOKEEPER_TICK_TIME: 2000
+#
+#  broker:
+#    image: confluentinc/cp-kafka:7.0.1
+#    container_name: broker
+#    ports:
+#      # To learn about configuring Kafka for access across networks see
+#      # https://www.confluent.io/blog/kafka-client-cannot-connect-to-broker-on-aws-on-docker-etc/
+#      - "9092:9092"
+#    depends_on:
+#      - zookeeper
+#    environment:
+#      KAFKA_BROKER_ID: 1
+#      KAFKA_ZOOKEEPER_CONNECT: 'zookeeper:2181'
+#      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_INTERNAL:PLAINTEXT
+#      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092,PLAINTEXT_INTERNAL://broker:29092
+#      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+#      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+#      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+#
+#
+#  kafka-ui:
+#    container_name: kafka-ui
+#    image: provectuslabs/kafka-ui:latest
+#    ports:
+#      - "8080:8080"
+#    depends_on:
+#      - zookeeper
+#      - broker
+#    environment:
+#      KAFKA_CLUSTERS_0_NAME: local
+#      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: broker:29092
+#      KAFKA_CLUSTERS_0_ZOOKEEPER: zookeeper:2181
+
+  db:
+    image: postgres
+    restart: always
+    environment:
+      POSTGRES_PASSWORD: 12345
+    ports:
+      - "15432:5432"
+    labels:
+      org.label-schema.group: "database"
+
+  keycloak:
+    image: quay.io/keycloak/keycloak
+    command:
+      - start-dev
+    environment:
+      DB_VENDOR: POSTGRES
+      DB_ADDR: db
+      DB_DATABASE: keycloak
+      DB_USER: postgres
+      DB_SCHEMA: public
+      DB_PASSWORD: 12345
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: Pa55w0rd
+      # Uncomment the line below if you want to specify JDBC parameters. The parameter below is just an example, and it shouldn't be used in production without knowledge. It is highly recommended that you read the PostgreSQL JDBC driver documentation in order to use it.
+      #JDBC_PARAMS: "ssl=true"
+    ports:
+      - 18081:8080
+    labels:
+      org.label-schema.group: "authentication"
+
+  fluentd:
+    build: config/fluentd
+    depends_on:
+      - elasticsearch
+    ports:
+      - "12201:12201/udp"
+    volumes:
+      - source: ./config/fluentd/etc
+        target: /fluentd/etc
+        type: bind
+    labels:
+      org.label-schema.group: "tools"
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.7.1
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+#      password has to be 400 or 600 to make this work
+#      - ELASTIC_PASSWORD_FILE=/run/secrets/provisioned-password.txt
+#    volumes:
+#      - ./elasticsearch/provisioned-password.txt:/run/secrets/provisioned-password.txt:ro
+    ports:
+      - 19200:9200
+    labels:
+      org.label-schema.group: "tools"
+
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.7.1
+    depends_on:
+      - elasticsearch
+    environment:
+      - xpack.security.enabled=false
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+    ports:
+      - 15601:5601
+    labels:
+      org.label-schema.group: "tools"
+
+
+  # This might fail to start with "too many open files" error. Fix: https://docs.rancherdesktop.io/how-to-guides/increasing-open-file-limit#windows-steps
+  jaeger-all-in-one:
+    image: jaegertracing/all-in-one:latest
+    depends_on:
+      - elasticsearch
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+#      Jaeger is not working with elasticsearch 8 yet ...
+#      - SPAN_STORAGE_TYPE=elasticsearch
+#      - ES_SERVER_URLS=http://elasticsearch:9200
+#      - ES_VERSION=7
+#      - ES_CREATE_INDEX_TEMPLATES=false
+#      - ES_INDEX_PREFIX=jaeger_
+#      - ES_USERNAME=elastic
+#      - ES_PASSWORD=qF5xqX3e15KF1t=LCPc9
+    ports:
+      - "16686:16686" # Jaeger UI
+      - "14268:14268" # Receive legacy OpenTracing traces, optional
+      - "4317:4317"   # OTLP gRPC receiver
+      - "4318:4318"   # OTLP HTTP receiver, not yet used by Quarkus, optional
+      - "14250:14250" # Receive from external otel-collector, optional
+#     This does not work with rancher desktop
+#    ulimits:
+#      nofiles:
+#        soft: 90000
+#        hard: 90000
+    labels:
+      org.label-schema.group: "monitoring"
+
+  prometheus:
+    image: prom/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yaml"
+    ports:
+      - "19090:9090"
+    volumes:
+      - ./config/prometheus/prometheus.yaml:/etc/prometheus/prometheus.yaml
+    labels:
+      org.label-schema.group: "monitoring"
+
+  grafana:
+    image: grafana/grafana-oss
+    depends_on:
+      - prometheus
+    environment:
+      - GF_SECURITY_ADMIN_USER=${ADMIN_USER}
+      - GF_SECURITY_ADMIN_PASSWORD=${ADMIN_PASSWORD}
+      - GF_USERS_ALLOW_SIGN_UP=false
+    ports:
+      - "13000:3000"
+    volumes:
+      - ./config/grafana/provisioning:/etc/grafana/provisioning
+    labels:
+      org.label-schema.group: "monitoring"
+
+  nodeexporter:
+    image: prom/node-exporter:v0.18.1
+    container_name: nodeexporter
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.rootfs=/rootfs'
+      - '--path.sysfs=/host/sys'
+      - '--collector.filesystem.ignored-mount-points=^/(sys|proc|dev|host|etc)($$|/)'
+    ports:
+      - "19100:9100"
+    restart: unless-stopped
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    labels:
+      org.label-schema.group: "monitoring"
+
+  cadvisor:
+    image: gcr.io/google-containers/cadvisor:v0.34.0
+    container_name: cadvisor
+    ports:
+      - "18080:8080"
+    restart: unless-stopped
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:rw
+      - /sys:/sys:ro
+      - /var/lib/docker:/var/lib/docker:ro
+      #- /cgroup:/cgroup:ro #doesn't work on MacOS only for Linux
+    labels:
+      org.label-schema.group: "monitoring"
+
+  locust-master:
+    image: locustio/locust
+    command: -f /mnt/locust/locustfile.py --master --loglevel=DEBUG --host=http://172.29.233.138:8080 
+    environment:
+      - LOCUST_HOST
+    ports:
+      - "18089:8089"
+    volumes:
+      - ./config/load-generator:/mnt/locust
+    labels:
+      org.label-schema.group: "load-generator"
+
+  locust-worker:
+    image: locustio/locust
+    command: -f /mnt/locust/locustfile.py --worker --loglevel=DEBUG --host=http://172.29.233.138:8080 --master-host locust-master
+    environment:
+      - LOCUST_HOST
+    volumes:
+      - ./config/load-generator:/mnt/locust
+    labels:
+      org.label-schema.group: "load-generator"
