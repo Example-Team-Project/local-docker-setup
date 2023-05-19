@@ -201,7 +201,7 @@ services:
 
   locust-master:
     image: locustio/locust
-    command: -f /mnt/locust/locustfile.py --master --loglevel=DEBUG --host=http://172.29.233.138:8080 
+    command: -f /mnt/locust/locustfile.py --master --loglevel=DEBUG --host=http://172.20.61.173:8080
     environment:
       - LOCUST_HOST
     ports:
@@ -213,7 +213,7 @@ services:
 
   locust-worker:
     image: locustio/locust
-    command: -f /mnt/locust/locustfile.py --worker --loglevel=DEBUG --host=http://172.29.233.138:8080 --master-host locust-master
+    command: -f /mnt/locust/locustfile.py --worker --loglevel=DEBUG --host=http://172.20.61.173:8080 --master-host locust-master
     environment:
       - LOCUST_HOST
     volumes:

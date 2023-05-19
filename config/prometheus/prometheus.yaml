@@ -34,6 +34,13 @@ scrape_configs:
     scrape_interval: 3s
     static_configs:
       - targets:
-        - '172.29.233.138:18180'
-        - '172.29.233.138:18181'
-        - '172.29.233.138:18182'
+        - '172.20.61.173:18181'
+        - '172.20.61.173:18182'
+        - '172.20.61.173:18183'
+
+  - job_name: 'spring-micrometer'
+    metrics_path: '/actuator/prometheus'
+    scrape_interval: 3s
+    static_configs:
+      - targets:
+        - '172.20.61.173:18180'
